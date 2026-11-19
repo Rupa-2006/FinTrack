@@ -1,0 +1,2993 @@
+{
+  "info": {
+    "name": "FinTrack API",
+    "description": "Generated from backend/docs/openapi.yaml (version 1.1.0) by `npm run docs:postman`. Do not edit by hand.\n\nRuns top to bottom as a scenario with a throwaway account and fictional data. Pick the \"FinTrack local\" environment\nand fill in adminPassword (the demo administrator's password is in backend/scripts/seed-demo.js, development only).\nAuthentication: requests send the access token from the collection variable accessToken; /auth routes also need\nthe X-Requested-With header, and the refresh token travels in the ft_refresh cookie, which Postman keeps.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Dates and a unique throwaway account for each run.",
+          "const pad = (n) => String(n).padStart(2, '0');",
+          "const now = new Date();",
+          "const ym = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;",
+          "pm.collectionVariables.set('today', `${ym(now)}-${pad(now.getDate())}`);",
+          "pm.collectionVariables.set('month', ym(now));",
+          "pm.collectionVariables.set('monthStart', `${ym(now)}-01`);",
+          "pm.collectionVariables.set('nextMonth', ym(new Date(now.getFullYear(), now.getMonth() + 1, 1)));",
+          "pm.collectionVariables.set('nextYear', `${now.getFullYear() + 1}-${pad(now.getMonth() + 1)}-01`);",
+          "if (!pm.collectionVariables.get('email')) {",
+          "  pm.collectionVariables.set('email', `postman.${Date.now()}@example.test`);",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "accessToken",
+      "value": ""
+    },
+    {
+      "key": "adminAccessToken",
+      "value": ""
+    },
+    {
+      "key": "userId",
+      "value": ""
+    },
+    {
+      "key": "categoryId",
+      "value": ""
+    },
+    {
+      "key": "newCategoryId",
+      "value": ""
+    },
+    {
+      "key": "transactionId",
+      "value": ""
+    },
+    {
+      "key": "recurringId",
+      "value": ""
+    },
+    {
+      "key": "budgetId",
+      "value": ""
+    },
+    {
+      "key": "goalId",
+      "value": ""
+    },
+    {
+      "key": "today",
+      "value": ""
+    },
+    {
+      "key": "month",
+      "value": ""
+    },
+    {
+      "key": "monthStart",
+      "value": ""
+    },
+    {
+      "key": "nextMonth",
+      "value": ""
+    },
+    {
+      "key": "nextYear",
+      "value": ""
+    },
+    {
+      "key": "email",
+      "value": ""
+    },
+    {
+      "key": "fullName",
+      "value": "Postman Tester"
+    },
+    {
+      "key": "password",
+      "value": "Quiet-Harbour-Lamp-73!"
+    },
+    {
+      "key": "newPassword",
+      "value": "Bright-Meadow-Kite-58?"
+    },
+    {
+      "key": "missingId",
+      "value": "999999999"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "description": "Liveness and readiness probes. No authentication.",
+      "item": [
+        {
+          "name": "Liveness probe",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /health answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Liveness probe\n\nConfirms the process is running. Does not touch the database.",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Readiness probe",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /health/ready answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/ready",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "ready"
+              ]
+            },
+            "description": "Readiness probe\n\nConfirms the database is reachable and reports the applied schema version.",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Authentication",
+      "description": "Registration, sign-in, token refresh, sign-out and password reset.",
+      "item": [
+        {
+          "name": "Create an account and sign in",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('POST /auth/register answers 201', () => pm.expect([201]).to.include(pm.response.code));",
+                  "if (pm.response.code < 300) {",
+                  "  const json = pm.response.json();",
+                  "  pm.collectionVariables.set('accessToken', json.data.accessToken);",
+                  "  pm.collectionVariables.set('userId', json.data.user.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Requested-With",
+                "value": "XMLHttpRequest",
+                "description": "Required on /auth routes (CSRF protection)."
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Create an account and sign in\n\nLimited to 10 requests per hour per client. New accounts always get the USER role.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"{{fullName}}\",\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\",\n  \"baseCurrency\": \"INR\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Sign in",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('POST /auth/login answers 200', () => pm.expect([200]).to.include(pm.response.code));",
+                  "if (pm.response.code < 300) {",
+                  "  const json = pm.response.json();",
+                  "  pm.collectionVariables.set('accessToken', json.data.accessToken);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Requested-With",
+                "value": "XMLHttpRequest",
+                "description": "Required on /auth routes (CSRF protection)."
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Sign in\n\nLimited to 10 requests per 15 minutes per client. Five wrong passwords in a row lock the\naccount for 15 minutes. An unknown email and a wrong password return the same 401.\nWhen the account has two-step sign-in on, a correct password returns\n`{ mfaRequired: true, challengeToken, expiresInMinutes: 5 }` instead of a session, and no\ncookie; complete it with POST /auth/mfa/verify.\n",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Complete a two-step sign-in with an authenticator or recovery code",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('POST /auth/mfa/verify answers 401', () => pm.expect([401]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Requested-With",
+                "value": "XMLHttpRequest",
+                "description": "Required on /auth routes (CSRF protection)."
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/mfa/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "mfa",
+                "verify"
+              ]
+            },
+            "description": "Complete a two-step sign-in with an authenticator or recovery code\n\nThe challenge from /auth/login is valid for 5 minutes, works once and allows 5 attempts.\nWrong codes count towards the same account lockout as wrong passwords. An authenticator\ncode is accepted once (its 30-second step is remembered); a recovery code (\"xxxx-xxxx\")\nworks once, and the user is notified when one is used.\n",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"challengeToken\": \"not-a-real-challenge-token-000000000000000\",\n  \"code\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Exchange the refresh cookie for a new access token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('POST /auth/refresh answers 200', () => pm.expect([200]).to.include(pm.response.code));",
+                  "if (pm.response.code < 300) {",
+                  "  const json = pm.response.json();",
+                  "  if (json.data) pm.collectionVariables.set('accessToken', json.data.accessToken);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Requested-With",
+                "value": "XMLHttpRequest",
+                "description": "Required on /auth routes (CSRF protection)."
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "Exchange the refresh cookie for a new access token\n\nReads the `ft_refresh` cookie, returns a new access token and replaces the cookie\n(rotation). A refresh token works once: presenting an already-used token revokes the\nwhole session.\n",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Request a password reset link",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('POST /auth/forgot-password answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Requested-With",
+                "value": "XMLHttpRequest",
+                "description": "Required on /auth routes (CSRF protection)."
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/forgot-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "forgot-password"
+              ]
+            },
+            "description": "Request a password reset link\n\nAlways answers 200 with the same message, whether or not the address has an account.\nThe link is valid for 30 minutes and works once. Limited to 5 requests per hour per client.\n",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Choose a new password with a reset token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('POST /auth/reset-password answers 400', () => pm.expect([400]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Requested-With",
+                "value": "XMLHttpRequest",
+                "description": "Required on /auth routes (CSRF protection)."
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/reset-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "reset-password"
+              ]
+            },
+            "description": "Choose a new password with a reset token\n\nEnds every session of the account.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"not-a-real-reset-token-0000000000000000000000\",\n  \"password\": \"Another-Long-Passw0rd!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Account",
+      "description": "The signed-in user's own profile and password.",
+      "item": [
+        {
+          "name": "Read your own profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /users/profile answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "profile"
+              ]
+            },
+            "description": "Read your own profile"
+          }
+        },
+        {
+          "name": "Update your name and phone number",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('PUT /users/profile answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "profile"
+              ]
+            },
+            "description": "Update your name and phone number\n\nEmail, roles, status and main currency cannot be changed here; such fields are ignored.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"{{fullName}}\",\n  \"phone\": \"+91 98765 43210\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Categories",
+      "description": "System default categories plus the user's own.",
+      "item": [
+        {
+          "name": "List categories visible to you",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /categories answers 200', () => pm.expect([200]).to.include(pm.response.code));",
+                  "if (pm.response.code < 300) {",
+                  "  const json = pm.response.json();",
+                  "  const groceries = json.data.find((c) => c.name === 'Groceries') || json.data[0];",
+                  "  pm.collectionVariables.set('categoryId', groceries.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/categories?type=EXPENSE",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "categories"
+              ],
+              "query": [
+                {
+                  "key": "type",
+                  "value": "EXPENSE"
+                }
+              ]
+            },
+            "description": "List categories visible to you"
+          }
+        },
+        {
+          "name": "Create a category",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('POST /categories answers 201', () => pm.expect([201]).to.include(pm.response.code));",
+                  "if (pm.response.code < 300) {",
+                  "  const json = pm.response.json();",
+                  "  pm.collectionVariables.set('newCategoryId', json.data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "categories"
+              ]
+            },
+            "description": "Create a category",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Pet care {{$randomInt}}\",\n  \"type\": \"EXPENSE\",\n  \"color\": \"#1E2E57\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Rename or recolour one of your categories",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('PUT /categories/{id} answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/categories/{{newCategoryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "categories",
+                "{{newCategoryId}}"
+              ]
+            },
+            "description": "Rename or recolour one of your categories\n\nDefault categories cannot be changed (404).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Pets and vet {{$randomInt}}\",\n  \"color\": \"#344D8C\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Transactions",
+      "description": "Income and expenses. `amount` and `currency` are stored exactly as entered and never\nrewritten; `baseAmount` is the value in the user's main currency, with the `exchangeRate`\nthat produced it. Deleting is a soft delete.\n",
+      "item": [
+        {
+          "name": "List, filter, search and page through your transactions",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /transactions answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transactions?page=1&pageSize=20&sort=date&order=desc&search=groceries",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transactions"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                },
+                {
+                  "key": "sort",
+                  "value": "date"
+                },
+                {
+                  "key": "order",
+                  "value": "desc"
+                },
+                {
+                  "key": "search",
+                  "value": "groceries"
+                }
+              ]
+            },
+            "description": "List, filter, search and page through your transactions"
+          }
+        },
+        {
+          "name": "Record an income or expense",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('POST /transactions answers 201', () => pm.expect([201]).to.include(pm.response.code));",
+                  "if (pm.response.code < 300) {",
+                  "  const json = pm.response.json();",
+                  "  pm.collectionVariables.set('transactionId', json.data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transactions"
+              ]
+            },
+            "description": "Record an income or expense\n\nForeign-currency entries are converted with the stored rate snapshot for their date; if\nnone from the previous 7 days exists, today's rate is fetched and stored first. May raise\nbudget-threshold and unusual-spending notifications.\n",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"EXPENSE\",\n  \"categoryId\": {{categoryId}},\n  \"amount\": \"1250.50\",\n  \"currency\": \"INR\",\n  \"date\": \"{{today}}\",\n  \"description\": \"Weekly groceries\",\n  \"paymentMethod\": \"UPI\",\n  \"notes\": \"Fictional example\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Import rows from a CSV file (preview first, then save)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('POST /transactions/import answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/transactions/import",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transactions",
+                "import"
+              ]
+            },
+            "description": "Import rows from a CSV file (preview first, then save)\n\nThe web app reads the file and maps its columns; this endpoint takes up to 500 rows per\nrequest. Each row is checked on its own: date (YYYY-MM-DD, not in the future), type,\namount, currency, description, category name (or a fallback category per type), and\npayment method (names such as \"Card\" or \"Bank transfer\" are accepted). A row matching an\nexisting transaction (same date, amount, currency and description) is a duplicate.\nWith dryRun true (the default) nothing is saved and each row comes back as ready,\nduplicate or error. With dryRun false, ready rows are saved (duplicates only when\nskipDuplicates is false) through the normal path, without a confirmation each; one\nsummary notification follows. 60 requests per 15 minutes per user.\n",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dryRun\": true,\n  \"rows\": [\n    {\n      \"date\": \"{{today}}\",\n      \"type\": \"EXPENSE\",\n      \"amount\": \"1250.50\",\n      \"currency\": \"INR\",\n      \"description\": \"Imported groceries\",\n      \"category\": \"Groceries\",\n      \"paymentMethod\": \"Card\"\n    },\n    {\n      \"date\": \"not-a-date\",\n      \"type\": \"EXPENSE\",\n      \"amount\": \"10\",\n      \"currency\": \"INR\",\n      \"description\": \"Bad row\",\n      \"category\": \"Groceries\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "One transaction, including its decrypted notes",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /transactions/{id} answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transactions/{{transactionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transactions",
+                "{{transactionId}}"
+              ]
+            },
+            "description": "One transaction, including its decrypted notes"
+          }
+        },
+        {
+          "name": "Replace a transaction",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('PUT /transactions/{id} answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/transactions/{{transactionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transactions",
+                "{{transactionId}}"
+              ]
+            },
+            "description": "Replace a transaction\n\nThe stored rate is kept unless the currency or the date changes.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"EXPENSE\",\n  \"categoryId\": {{categoryId}},\n  \"amount\": \"1310.00\",\n  \"currency\": \"INR\",\n  \"date\": \"{{today}}\",\n  \"description\": \"Weekly groceries and fruit\",\n  \"paymentMethod\": \"CARD\",\n  \"notes\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Recurring",
+      "description": "Weekly, monthly and yearly transactions recorded automatically.",
+      "item": [
+        {
+          "name": "Your recurring transactions, after creating any that have fallen due",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /recurring answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/recurring",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "recurring"
+              ]
+            },
+            "description": "Your recurring transactions, after creating any that have fallen due"
+          }
+        },
+        {
+          "name": "Create a weekly, monthly or yearly recurring transaction",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('POST /recurring answers 201', () => pm.expect([201]).to.include(pm.response.code));",
+                  "if (pm.response.code < 300) {",
+                  "  const json = pm.response.json();",
+                  "  pm.collectionVariables.set('recurringId', json.data.rule.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/recurring",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "recurring"
+              ]
+            },
+            "description": "Create a weekly, monthly or yearly recurring transaction\n\nOccurrence n falls on startDate plus n weeks, months or years (a monthly rule from the\n31st uses the last day of shorter months). Occurrences up to today are created at once\n(the start may be up to a year back), later ones when the user next opens transactions,\nthe dashboard or this list. Each is a normal transaction, converted at that day's rate\nand created exactly once. Returns { rule, generated }.\n",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"EXPENSE\",\n  \"categoryId\": {{categoryId}},\n  \"amount\": \"649.00\",\n  \"currency\": \"INR\",\n  \"description\": \"Music streaming\",\n  \"paymentMethod\": \"CARD\",\n  \"frequency\": \"MONTHLY\",\n  \"startDate\": \"{{today}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Change, pause or resume a recurring transaction (applies to future occurrences)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('PUT /recurring/{id} answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/recurring/{{recurringId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "recurring",
+                "{{recurringId}}"
+              ]
+            },
+            "description": "Change, pause or resume a recurring transaction (applies to future occurrences)\n\nThe schedule (frequency and start) is fixed; delete and recreate to change it. Resuming creates missed occurrences.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"EXPENSE\",\n  \"categoryId\": {{categoryId}},\n  \"amount\": \"699.00\",\n  \"currency\": \"INR\",\n  \"description\": \"Music streaming\",\n  \"paymentMethod\": \"CARD\",\n  \"endDate\": null,\n  \"paused\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Budgets",
+      "description": "Monthly budgets in the main currency. Spent amounts are computed from transactions.",
+      "item": [
+        {
+          "name": "Budgets of a month with progress",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /budgets answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/budgets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "budgets"
+              ]
+            },
+            "description": "Budgets of a month with progress"
+          }
+        },
+        {
+          "name": "Create a budget",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('POST /budgets answers 201', () => pm.expect([201]).to.include(pm.response.code));",
+                  "if (pm.response.code < 300) {",
+                  "  const json = pm.response.json();",
+                  "  pm.collectionVariables.set('budgetId', json.data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/budgets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "budgets"
+              ]
+            },
+            "description": "Create a budget",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"budgetType\": \"CATEGORY\",\n  \"categoryId\": {{categoryId}},\n  \"month\": \"{{month}}\",\n  \"amount\": \"6000.00\",\n  \"alertThresholdPct\": 80\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Copy every budget of one month to another (existing ones are kept)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('POST /budgets/copy answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/budgets/copy",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "budgets",
+                "copy"
+              ]
+            },
+            "description": "Copy every budget of one month to another (existing ones are kept)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fromMonth\": \"{{month}}\",\n  \"toMonth\": \"{{nextMonth}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Change a budget's amount or alert threshold",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('PUT /budgets/{id} answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/budgets/{{budgetId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "budgets",
+                "{{budgetId}}"
+              ]
+            },
+            "description": "Change a budget's amount or alert threshold",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": \"6500.00\",\n  \"alertThresholdPct\": 90\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Goals",
+      "description": "Savings goals with contributions (positive) and withdrawals (negative).",
+      "item": [
+        {
+          "name": "Your savings goals",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /goals answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/goals",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "goals"
+              ]
+            },
+            "description": "Your savings goals"
+          }
+        },
+        {
+          "name": "Create a savings goal",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('POST /goals answers 201', () => pm.expect([201]).to.include(pm.response.code));",
+                  "if (pm.response.code < 300) {",
+                  "  const json = pm.response.json();",
+                  "  pm.collectionVariables.set('goalId', json.data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/goals",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "goals"
+              ]
+            },
+            "description": "Create a savings goal",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Emergency fund\",\n  \"targetAmount\": \"100000.00\",\n  \"currency\": \"INR\",\n  \"deadline\": \"{{nextYear}}\",\n  \"notes\": \"Six months of expenses\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "One goal with its latest 100 contributions",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /goals/{id} answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/goals/{{goalId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "goals",
+                "{{goalId}}"
+              ]
+            },
+            "description": "One goal with its latest 100 contributions"
+          }
+        },
+        {
+          "name": "Edit, cancel (status CANCELLED) or reopen (status IN_PROGRESS) a goal",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('PUT /goals/{id} answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/goals/{{goalId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "goals",
+                "{{goalId}}"
+              ]
+            },
+            "description": "Edit, cancel (status CANCELLED) or reopen (status IN_PROGRESS) a goal",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Emergency fund\",\n  \"targetAmount\": \"120000.00\",\n  \"deadline\": \"{{nextYear}}\",\n  \"notes\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Add money (positive amount) or withdraw it (negative amount)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('POST /goals/{id}/contributions answers 201', () => pm.expect([201]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/goals/{{goalId}}/contributions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "goals",
+                "{{goalId}}",
+                "contributions"
+              ]
+            },
+            "description": "Add money (positive amount) or withdraw it (negative amount)\n\nThe saved total cannot go below zero. A cancelled goal answers 409.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": \"5000.00\",\n  \"date\": \"{{today}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Currencies",
+      "description": "Exchange-rate snapshots (European Central Bank via Frankfurter), conversion and the main currency.",
+      "item": [
+        {
+          "name": "Supported currencies and your main currency",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /currencies answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/currencies",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "currencies"
+              ]
+            },
+            "description": "Supported currencies and your main currency"
+          }
+        },
+        {
+          "name": "Newest stored rate from a base currency to each other currency",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /currencies/rates answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/currencies/rates?base=INR",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "currencies",
+                "rates"
+              ],
+              "query": [
+                {
+                  "key": "base",
+                  "value": "INR"
+                }
+              ]
+            },
+            "description": "Newest stored rate from a base currency to each other currency"
+          }
+        },
+        {
+          "name": "Fetch and store today's rates for every supported currency",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('POST /currencies/rates/refresh answers 200 or 429 or 503', () => pm.expect([200, 429, 503]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/currencies/rates/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "currencies",
+                "rates",
+                "refresh"
+              ]
+            },
+            "description": "Fetch and store today's rates for every supported currency\n\nLimited to 10 requests per 15 minutes. Only currency codes are sent to the rates service."
+          }
+        },
+        {
+          "name": "Convert an amount with the newest stored rate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /currencies/convert answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/currencies/convert?amount=100&from=USD&to=INR",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "currencies",
+                "convert"
+              ],
+              "query": [
+                {
+                  "key": "amount",
+                  "value": "100"
+                },
+                {
+                  "key": "from",
+                  "value": "USD"
+                },
+                {
+                  "key": "to",
+                  "value": "INR"
+                }
+              ]
+            },
+            "description": "Convert an amount with the newest stored rate"
+          }
+        },
+        {
+          "name": "Change your main currency",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('PUT /currencies/base answers 200 or 503', () => pm.expect([200, 503]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/currencies/base",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "currencies",
+                "base"
+              ]
+            },
+            "description": "Change your main currency\n\nRe-values every transaction at the rate of its own date and every budget at the latest\nrate, in one database transaction. Original amounts are never changed.\n",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"baseCurrency\": \"EUR\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Analytics",
+      "description": "Summaries and trends in the main currency. Read-only.",
+      "item": [
+        {
+          "name": "Income, expenses, net and savings rate for a period, with the change on the previous period",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /analytics/summary answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/analytics/summary",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "analytics",
+                "summary"
+              ]
+            },
+            "description": "Income, expenses, net and savings rate for a period, with the change on the previous period\n\nUse `month`, or `from` and `to` for any range (the Analytics page sends a day, a\nMonday-to-Sunday week, a month or a calendar year). The comparison period:\na day -> the day before; a week -> the week before; a calendar month -> the month before;\na calendar year -> the year before; any other range -> the range of the same length just\nbefore it. While a week, month or year is still running, the comparison stops at the same\npoint of the previous one.\n"
+          }
+        },
+        {
+          "name": "One entry per month (empty months included)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /analytics/monthly answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/analytics/monthly?months=6",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "analytics",
+                "monthly"
+              ],
+              "query": [
+                {
+                  "key": "months",
+                  "value": "6"
+                }
+              ]
+            },
+            "description": "One entry per month (empty months included)"
+          }
+        },
+        {
+          "name": "Totals by category for a period",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /analytics/categories answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/analytics/categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "analytics",
+                "categories"
+              ]
+            },
+            "description": "Totals by category for a period"
+          }
+        },
+        {
+          "name": "Everything the dashboard shows, in one request",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /analytics/dashboard answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/analytics/dashboard",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "analytics",
+                "dashboard"
+              ]
+            },
+            "description": "Everything the dashboard shows, in one request"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reports",
+      "description": "The monthly report and CSV export.",
+      "item": [
+        {
+          "name": "The monthly report (categories, days, payment methods, largest expenses, budgets)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /reports/monthly answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/reports/monthly",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reports",
+                "monthly"
+              ]
+            },
+            "description": "The monthly report (categories, days, payment methods, largest expenses, budgets)"
+          }
+        },
+        {
+          "name": "Download transactions as CSV (up to 10 000 rows)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /reports/export answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/reports/export?from={{monthStart}}&to={{today}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reports",
+                "export"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "{{monthStart}}"
+                },
+                {
+                  "key": "to",
+                  "value": "{{today}}"
+                }
+              ]
+            },
+            "description": "Download transactions as CSV (up to 10 000 rows)\n\nUTF-8 with a byte-order mark. Text cells are quoted, and text starting with = + - @ is\nprefixed with an apostrophe so spreadsheets cannot run it as a formula.\n"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Notifications",
+      "description": "In-app notifications (budget alerts, unusual spending, monthly summaries).",
+      "item": [
+        {
+          "name": "Your notifications, newest first",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /notifications answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications"
+              ]
+            },
+            "description": "Your notifications, newest first\n\nThe first call in a new month also creates last month's summary. Types: BUDGET_THRESHOLD,\nUNUSUAL_SPENDING, TRANSACTION (confirmation of each new transaction), SECURITY,\nMONTHLY_SUMMARY, SYSTEM.\n"
+          }
+        },
+        {
+          "name": "Number of unread notifications",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /notifications/unread-count answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/unread-count",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications",
+                "unread-count"
+              ]
+            },
+            "description": "Number of unread notifications"
+          }
+        },
+        {
+          "name": "Mark every notification as read",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('POST /notifications/read-all answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/read-all",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications",
+                "read-all"
+              ]
+            },
+            "description": "Mark every notification as read"
+          }
+        },
+        {
+          "name": "Mark one notification as read",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('PATCH /notifications/{id}/read answers 404', () => pm.expect([404]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/{{missingId}}/read",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications",
+                "{{missingId}}",
+                "read"
+              ]
+            },
+            "description": "Mark one notification as read"
+          }
+        },
+        {
+          "name": "Delete one notification",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('DELETE /notifications/{id} answers 404', () => pm.expect([404]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/{{missingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications",
+                "{{missingId}}"
+              ]
+            },
+            "description": "Delete one notification"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Assistant",
+      "description": "AI insights and questions over the signed-in user's own records.",
+      "item": [
+        {
+          "name": "Findings about your own spending",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /assistant/insights answers 200 or 503', () => pm.expect([200, 503]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/assistant/insights",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "assistant",
+                "insights"
+              ]
+            },
+            "description": "Findings about your own spending\n\nInsight cards, unusual expenses (robust z-score and Isolation Forest, each with a reason),\na month-end spending estimate with a range, budget suggestions, regular payments and goal\noutlook. Computed by the internal AI service from your records of the last 13 months only.\nLimited to 30 calls per 5 minutes per user. Estimates are not guarantees and nothing here is\nfinancial advice.\n"
+          }
+        },
+        {
+          "name": "Ask a question about your own records",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('POST /assistant/ask answers 200 or 503', () => pm.expect([200, 503]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/assistant/ask",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "assistant",
+                "ask"
+              ]
+            },
+            "description": "Ask a question about your own records\n\nAnswered by a rule-based engine from your records only: the response gives `answer`,\n`facts` (label and value pairs), the `period` it used, `followUps` and, where relevant, a\n`disclaimer`. Investment, tax, loan and insurance questions are declined. Questions are\nnot stored. Shares the per-user limit with /assistant/insights.\n",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question\": \"How much did I spend on groceries this month?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Security",
+      "description": "The signed-in user's sessions, security events and audit trail.",
+      "item": [
+        {
+          "name": "List your active sessions",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /security/sessions answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/security/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "security",
+                "sessions"
+              ]
+            },
+            "description": "List your active sessions"
+          }
+        },
+        {
+          "name": "Your sign-in history and security events",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /security/events answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/security/events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "security",
+                "events"
+              ]
+            },
+            "description": "Your sign-in history and security events"
+          }
+        },
+        {
+          "name": "Your own entries in the tamper-evident audit log",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /security/audit-logs answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/security/audit-logs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "security",
+                "audit-logs"
+              ]
+            },
+            "description": "Your own entries in the tamper-evident audit log\n\nEntries name the action, record and changed field names; never amounts, notes or secrets."
+          }
+        },
+        {
+          "name": "Whether two-step sign-in is on, since when, and how many recovery codes are left",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /security/mfa answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/security/mfa",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "security",
+                "mfa"
+              ]
+            },
+            "description": "Whether two-step sign-in is on, since when, and how many recovery codes are left"
+          }
+        },
+        {
+          "name": "Start setting up two-step sign-in",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('POST /security/mfa/setup answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/security/mfa/setup",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "security",
+                "mfa",
+                "setup"
+              ]
+            },
+            "description": "Start setting up two-step sign-in\n\nReturns a new TOTP secret (base32) and the otpauth:// URI for a QR code. The secret is\nstored encrypted and does nothing until confirmed with /security/mfa/enable; 409 when it\nis already on. All /security/mfa routes allow 10 requests per 15 minutes per account.\n"
+          }
+        },
+        {
+          "name": "Turn two-step sign-in on with the first code from the app; returns 10 recovery codes once",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('POST /security/mfa/enable answers 400', () => pm.expect([400]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/security/mfa/enable",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "security",
+                "mfa",
+                "enable"
+              ]
+            },
+            "description": "Turn two-step sign-in on with the first code from the app; returns 10 recovery codes once",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"000000\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Turn two-step sign-in off (needs the password and a current or recovery code)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('POST /security/mfa/disable answers 409', () => pm.expect([409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/security/mfa/disable",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "security",
+                "mfa",
+                "disable"
+              ]
+            },
+            "description": "Turn two-step sign-in off (needs the password and a current or recovery code)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"password\": \"{{password}}\",\n  \"code\": \"000000\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Replace the recovery codes (needs the password); returns the new codes once",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('POST /security/mfa/recovery-codes answers 409', () => pm.expect([409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/security/mfa/recovery-codes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "security",
+                "mfa",
+                "recovery-codes"
+              ]
+            },
+            "description": "Replace the recovery codes (needs the password); returns the new codes once",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "description": "Account management and security monitoring. ADMIN role required.",
+      "item": [
+        {
+          "name": "Sign in as administrator",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('administrator signed in', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('adminAccessToken', pm.response.json().data.accessToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "X-Requested-With",
+                "value": "XMLHttpRequest"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Uses adminEmail and adminPassword from the environment (the demo administrator locally)."
+          }
+        },
+        {
+          "name": "Account, session, usage and security counts",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /admin/overview answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/overview",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "overview"
+              ]
+            },
+            "description": "Account, session, usage and security counts"
+          }
+        },
+        {
+          "name": "Accounts (metadata only)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /admin/users answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/users?search=fintrack.demo",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "users"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "fintrack.demo"
+                }
+              ]
+            },
+            "description": "Accounts (metadata only)"
+          }
+        },
+        {
+          "name": "Suspend (ends every session) or reactivate an account",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('PATCH /admin/users/{id}/status answers 200 or 409', () => pm.expect([200, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/users/{{userId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "users",
+                "{{userId}}",
+                "status"
+              ]
+            },
+            "description": "Suspend (ends every session) or reactivate an account\n\nNot your own account, not an account closed by its owner, not the last active administrator.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"ACTIVE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Grant or remove a role",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('PUT /admin/users/{id}/roles answers 200 or 409', () => pm.expect([200, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/users/{{userId}}/roles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "users",
+                "{{userId}}",
+                "roles"
+              ]
+            },
+            "description": "Grant or remove a role\n\nTakes effect on the user's next request. Not your own account; the last active administrator keeps ADMIN; USER cannot be removed.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"ADMIN\",\n  \"granted\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Clear a sign-in lockout",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('POST /admin/users/{id}/unlock answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/users/{{userId}}/unlock",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "users",
+                "{{userId}}",
+                "unlock"
+              ]
+            },
+            "description": "Clear a sign-in lockout"
+          }
+        },
+        {
+          "name": "Security events across all accounts",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /admin/security-events answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/security-events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "security-events"
+              ]
+            },
+            "description": "Security events across all accounts"
+          }
+        },
+        {
+          "name": "The audit log across all accounts",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('GET /admin/audit-logs answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/audit-logs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "audit-logs"
+              ]
+            },
+            "description": "The audit log across all accounts"
+          }
+        },
+        {
+          "name": "Recompute the whole audit hash chain",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('POST /admin/audit-logs/verify answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/audit-logs/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "audit-logs",
+                "verify"
+              ]
+            },
+            "description": "Recompute the whole audit hash chain\n\nReports `{ valid, checkedRows, lastId }` or the first broken row and why. Detects tampering;\nit cannot prevent or undo it. The check itself is recorded. Limited to 10 per 15 minutes.\n"
+          }
+        }
+      ],
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{adminAccessToken}}",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "End of run (destructive)",
+      "description": "Deletes what the run created, changes the throwaway account's password, signs it out and deactivates it. Run last.",
+      "item": [
+        {
+          "name": "Stop a recurring transaction; transactions it already created stay",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('DELETE /recurring/{id} answers 204', () => pm.expect([204]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/recurring/{{recurringId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "recurring",
+                "{{recurringId}}"
+              ]
+            },
+            "description": "Stop a recurring transaction; transactions it already created stay"
+          }
+        },
+        {
+          "name": "Delete a transaction (soft delete)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('DELETE /transactions/{id} answers 204', () => pm.expect([204]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transactions/{{transactionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transactions",
+                "{{transactionId}}"
+              ]
+            },
+            "description": "Delete a transaction (soft delete)"
+          }
+        },
+        {
+          "name": "Delete a budget",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('DELETE /budgets/{id} answers 204', () => pm.expect([204]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/budgets/{{budgetId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "budgets",
+                "{{budgetId}}"
+              ]
+            },
+            "description": "Delete a budget"
+          }
+        },
+        {
+          "name": "Delete a goal and its contributions",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('DELETE /goals/{id} answers 204', () => pm.expect([204]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/goals/{{goalId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "goals",
+                "{{goalId}}"
+              ]
+            },
+            "description": "Delete a goal and its contributions"
+          }
+        },
+        {
+          "name": "Delete (unused) or archive (in use) one of your categories",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('DELETE /categories/{id} answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/categories/{{newCategoryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "categories",
+                "{{newCategoryId}}"
+              ]
+            },
+            "description": "Delete (unused) or archive (in use) one of your categories"
+          }
+        },
+        {
+          "name": "End one of your sessions",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('DELETE /security/sessions/{id} answers 404', () => pm.expect([404]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/security/sessions/{{missingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "security",
+                "sessions",
+                "{{missingId}}"
+              ]
+            },
+            "description": "End one of your sessions"
+          }
+        },
+        {
+          "name": "Sign out everywhere else",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('DELETE /security/sessions answers 200', () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/security/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "security",
+                "sessions"
+              ]
+            },
+            "description": "Sign out everywhere else\n\nRevokes every session except the one making the request."
+          }
+        },
+        {
+          "name": "Change your password",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('PUT /users/password answers 200', () => pm.expect([200]).to.include(pm.response.code));",
+                  "if (pm.response.code < 300) {",
+                  "  const json = pm.response.json();",
+                  "  pm.collectionVariables.set('password', pm.collectionVariables.get('newPassword'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "password"
+              ]
+            },
+            "description": "Change your password\n\nRequires the current password. Signs out every other session.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"{{password}}\",\n  \"newPassword\": \"{{newPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Deactivate your account",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('POST /users/deactivate answers 204', () => pm.expect([204]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/deactivate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "deactivate"
+              ]
+            },
+            "description": "Deactivate your account\n\nRequires the password. The account is kept but can no longer sign in; every session ends. Not available to administrators.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Sign out",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('POST /auth/logout answers 204', () => pm.expect([204]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Requested-With",
+                "value": "XMLHttpRequest",
+                "description": "Required on /auth routes (CSRF protection)."
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "Sign out\n\nRevokes the session of the refresh cookie and clears the cookie. Safe to call twice.",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

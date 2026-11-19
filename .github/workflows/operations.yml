@@ -1,0 +1,79 @@
+# Production operations, run by hand (Actions -> "Production operations" -> Run workflow):
+#
+#   make-admin            give an existing account the ADMIN role (the first administrator)
+#   verify-audit-chain    recompute the audit hash chain and report the first broken link
+#   save-audit-anchor     record the current chain end and keep it as a workflow artifact,
+#                         outside the database (download it and keep it somewhere safe)
+#
+# Uses the same values as the Render API service, stored as secrets of the "production"
+# environment. Every change these tasks make is written to the audit trail.
+name: Production operations
+
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        type: choice
+        options: [verify-audit-chain, save-audit-anchor, make-admin]
+        default: verify-audit-chain
+      email:
+        description: "make-admin only: email address of an existing, active account"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      NODE_ENV: production
+      LOG_LEVEL: warn
+      DB_HOST: ${{ secrets.DB_HOST }}
+      DB_PORT: ${{ secrets.DB_PORT }}
+      DB_NAME: ${{ secrets.DB_NAME }}
+      DB_USER: ${{ secrets.DB_USER }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      DB_SSL: "true"
+      DB_SSL_CA: ${{ secrets.DB_SSL_CA }}
+      JWT_ACCESS_SECRET: ${{ secrets.JWT_ACCESS_SECRET }}
+      ENCRYPTION_KEYS: ${{ secrets.ENCRYPTION_KEYS }}
+      ENCRYPTION_ACTIVE_KEY_VERSION: ${{ secrets.ENCRYPTION_ACTIVE_KEY_VERSION }}
+      AUDIT_HMAC_KEY: ${{ secrets.AUDIT_HMAC_KEY }}
+      CLIENT_ORIGINS: ${{ secrets.CLIENT_ORIGINS }}
+      APP_PUBLIC_URL: ${{ secrets.CLIENT_ORIGINS }}
+      AI_SERVICE_URL: ${{ secrets.AI_SERVICE_URL }}
+      AI_SERVICE_SHARED_SECRET: ${{ secrets.AI_SERVICE_SHARED_SECRET }}
+      FX_API_URL: https://api.frankfurter.dev/v1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci --omit=dev
+
+      - name: Make administrator
+        if: inputs.task == 'make-admin'
+        env:
+          ADMIN_EMAIL: ${{ inputs.email }}
+        run: npm run make-admin -- "$ADMIN_EMAIL"
+
+      - name: Verify audit chain
+        if: inputs.task == 'verify-audit-chain'
+        run: npm run audit:verify
+
+      - name: Save audit anchor
+        if: inputs.task == 'save-audit-anchor'
+        run: npm run audit:anchor
+      - uses: actions/upload-artifact@v4
+        if: inputs.task == 'save-audit-anchor'
+        with:
+          name: audit-anchor-${{ github.run_id }}
+          path: backend/audit-anchors/
+          retention-days: 90

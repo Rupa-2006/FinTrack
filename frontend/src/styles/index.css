@@ -1,0 +1,63 @@
+@import '@fontsource-variable/inter';
+@import 'tailwindcss';
+
+/* Design tokens. Navy and white carry the brand; colour is otherwise reserved for meaning
+   (green = money in, red = money out, amber = warning). */
+@theme {
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  --color-navy-50: #f3f6fb;
+  --color-navy-100: #e4eaf5;
+  --color-navy-200: #c5d1e8;
+  --color-navy-300: #99add6;
+  --color-navy-400: #6883c0;
+  --color-navy-500: #4664a8;
+  --color-navy-600: #344d8c;
+  --color-navy-700: #2a3e72;
+  --color-navy-800: #1e2e57;
+  --color-navy-900: #14213d;
+  --color-navy-950: #0b1429;
+
+  --color-income: #047857; /* emerald-700: 5.5:1 on white, AA for text */
+  --color-expense: #e11d48;
+  --color-warning: #b45309; /* amber-700: 5.0:1 on white */
+
+  --shadow-card: 0 1px 2px rgb(20 33 61 / 0.05), 0 4px 16px rgb(20 33 61 / 0.06);
+  --shadow-lift: 0 2px 4px rgb(20 33 61 / 0.06), 0 12px 32px rgb(20 33 61 / 0.12);
+
+  --animate-fade-up: fade-up 0.5s ease-out both;
+  @keyframes fade-up {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-navy-50 font-sans text-navy-900 antialiased;
+  }
+  /* Amounts line up in columns */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-navy-500;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media print {
+  .no-print { display: none !important; }
+  body { background: #fff; }
+}

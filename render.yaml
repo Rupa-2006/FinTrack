@@ -1,0 +1,109 @@
+# Render Blueprint: the API and the AI service (https://render.com/docs/blueprint-spec).
+# The frontend is on Vercel (frontend/vercel.json); MySQL is a managed service (see
+# docs/DEPLOYMENT.md). Secrets are marked `sync: false`: Render asks for them when the
+# Blueprint is first applied and they never live in this repository.
+
+services:
+  # ---------------------------------------------------------------- API (Node / Express)
+  - type: web
+    name: fintrack-api
+    runtime: node
+    plan: free
+    region: frankfurt
+    rootDir: backend
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /api/health/ready
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      # Browser -> Vercel edge -> Render proxy -> API: trust two hops so req.ip is the
+      # visitor's address (rate limits, sign-in history). Check it after the first deploy.
+      - key: TRUST_PROXY
+        value: "2"
+      - key: LOG_LEVEL
+        value: info
+      - key: API_DOCS_ENABLED
+        value: "false"
+
+      # MySQL (managed). Runtime account only; the migrator account is used by the
+      # migration workflow, never by the running API.
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_POOL_SIZE
+        value: "5"
+      - key: DB_SSL
+        value: "true"
+      - key: DB_SSL_CA
+        sync: false
+
+      # Secrets: 64 hex characters each (node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
+      - key: JWT_ACCESS_SECRET
+        sync: false
+      - key: ENCRYPTION_KEYS
+        sync: false
+      - key: ENCRYPTION_ACTIVE_KEY_VERSION
+        value: "1"
+      - key: AUDIT_HMAC_KEY
+        sync: false
+      - key: AI_SERVICE_SHARED_SECRET
+        sync: false
+
+      # https://<your-app>.vercel.app (no trailing slash). Same value for both.
+      - key: CLIENT_ORIGINS
+        sync: false
+      - key: APP_PUBLIC_URL
+        sync: false
+
+      - key: AI_SERVICE_URL
+        sync: false
+      - key: FX_API_URL
+        value: https://api.frankfurter.dev/v1
+
+      # Email for password resets (any SMTP provider, e.g. Brevo free tier)
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+
+  # ---------------------------------------------------------------- AI service (FastAPI)
+  # Stateless, no database credentials, accepts only HMAC-signed requests from the API.
+  # On the free plan it gets a public URL; the signature check (with replay protection) is
+  # what keeps it closed. On a paid plan, change `type` to `pserv` so it has no public URL
+  # at all and set AI_SERVICE_URL to its private address.
+  - type: web
+    name: fintrack-ai
+    runtime: python
+    plan: free
+    region: frankfurt
+    rootDir: ai-service
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn --factory app.main:create_app --host 0.0.0.0 --port $PORT --proxy-headers --no-server-header
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.10"
+      - key: AI_SERVICE_SHARED_SECRET
+        sync: false
+      - key: SIGNATURE_MAX_AGE_SECONDS
+        value: "60"
+      - key: AI_DOCS_ENABLED
+        value: "false"

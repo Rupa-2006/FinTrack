@@ -1,0 +1,62 @@
+{
+  "name": "fintrack-backend",
+  "version": "1.1.0",
+  "private": true,
+  "description": "FinTrack REST API",
+  "main": "server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "lint": "eslint .",
+    "test": "jest --runInBand",
+    "test:coverage": "jest --runInBand --coverage --coverageReporters=text-summary --coverageReporters=html",
+    "security:smoke": "node scripts/security-smoke.js",
+    "docs:postman": "node scripts/build-postman.js",
+    "init:env": "node scripts/init-env.js",
+    "migrate": "node scripts/migrate.js",
+    "migrate:status": "node scripts/migrate.js --status",
+    "migrate:test": "node scripts/migrate.js --test",
+    "seed:demo": "node scripts/seed-demo.js",
+    "audit:verify": "node scripts/audit-chain.js verify",
+    "audit:anchor": "node scripts/audit-chain.js anchor",
+    "keys:rotate": "node scripts/rotate-encryption-key.js",
+    "make-admin": "node scripts/make-admin.js"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": [
+      "**/tests/**/*.test.js"
+    ],
+    "testTimeout": 30000,
+    "globalSetup": "./tests/globalSetup.js"
+  },
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "decimal.js": "^10.6.0",
+    "dotenv": "^18.0.10",
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.7.4",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "mysql2": "^3.24.6",
+    "nodemailer": "^10.6.0",
+    "pino": "^10.4.0",
+    "pino-http": "^11.0.0",
+    "swagger-ui-express": "^5.0.1",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.15.0",
+    "globals": "^17.14.0",
+    "jest": "^30.5.2",
+    "pino-pretty": "^13.2.0",
+    "supertest": "^7.3.2"
+  }
+}

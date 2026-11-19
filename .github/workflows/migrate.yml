@@ -1,0 +1,54 @@
+# Applies database migrations to production. Run it by hand (Actions -> "Migrate production
+# database" -> Run workflow) before deploying an API version that needs a new migration.
+#
+# Uses the migrator account, which exists only here: the running API connects with the
+# least-privilege runtime account. Credentials come from the "production" environment's
+# secrets (Settings -> Environments), which can require a reviewer's approval.
+name: Migrate production database
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "status = list pending migrations only; apply = run them"
+        type: choice
+        options: [status, apply]
+        default: status
+
+permissions:
+  contents: read
+
+concurrency:
+  group: migrate-production
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DB_HOST: ${{ secrets.DB_HOST }}
+      DB_PORT: ${{ secrets.DB_PORT }}
+      DB_NAME: ${{ secrets.DB_NAME }}
+      DB_USER: ${{ secrets.DB_USER }}
+      DB_APP_HOSTS: "%"
+      DB_MIGRATOR_USER: ${{ secrets.DB_MIGRATOR_USER }}
+      DB_MIGRATOR_PASSWORD: ${{ secrets.DB_MIGRATOR_PASSWORD }}
+      DB_SSL: "true"
+      DB_SSL_CA: ${{ secrets.DB_SSL_CA }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci --omit=dev
+      - name: Pending migrations
+        run: npm run migrate:status
+      - name: Apply
+        if: inputs.mode == 'apply'
+        run: npm run migrate

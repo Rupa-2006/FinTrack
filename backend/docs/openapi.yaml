@@ -1,0 +1,1395 @@
+openapi: 3.0.3
+info:
+  title: FinTrack API
+  version: 1.1.0
+  description: |
+    REST API of the FinTrack personal finance platform. Fictional data only.
+
+    **Conventions**
+    - Every response is JSON. Success: `{ success: true, data, meta? }`.
+      Failure: `{ success: false, error: { code, message, details?, requestId } }`.
+    - Every response carries `X-Request-Id`; quote it when reporting a problem.
+    - Responses are never cacheable (`Cache-Control: no-store`).
+    - All routes are rate limited. Limits are reported in the `RateLimit` and `RateLimit-Policy`
+      headers; exceeding them returns `429 RATE_LIMITED`.
+    - Request bodies are limited to 100 kB.
+
+    Endpoints are added to this document in the phase that implements them.
+servers:
+  - url: /api
+tags:
+  - name: Health
+    description: Liveness and readiness probes. No authentication.
+  - name: Authentication
+    description: Registration, sign-in, token refresh, sign-out and password reset.
+  - name: Account
+    description: The signed-in user's own profile and password.
+  - name: Security
+    description: The signed-in user's sessions, security events and audit trail.
+  - name: Admin
+    description: Account management and security monitoring. ADMIN role required.
+  - name: Assistant
+    description: AI insights and questions over the signed-in user's own records.
+  - name: Categories
+    description: System default categories plus the user's own.
+  - name: Transactions
+    description: |
+      Income and expenses. `amount` and `currency` are stored exactly as entered and never
+      rewritten; `baseAmount` is the value in the user's main currency, with the `exchangeRate`
+      that produced it. Deleting is a soft delete.
+  - name: Recurring
+    description: Weekly, monthly and yearly transactions recorded automatically.
+  - name: Budgets
+    description: Monthly budgets in the main currency. Spent amounts are computed from transactions.
+  - name: Goals
+    description: Savings goals with contributions (positive) and withdrawals (negative).
+  - name: Currencies
+    description: Exchange-rate snapshots (European Central Bank via Frankfurter), conversion and the main currency.
+  - name: Analytics
+    description: Summaries and trends in the main currency. Read-only.
+  - name: Reports
+    description: The monthly report and CSV export.
+  - name: Notifications
+    description: In-app notifications (budget alerts, unusual spending, monthly summaries).
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Liveness probe
+      description: Confirms the process is running. Does not touch the database.
+      security: []
+      responses:
+        '200':
+          description: The API process is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { type: boolean, example: true }
+                  data:
+                    type: object
+                    required: [status, service, version, uptimeSeconds, timestamp]
+                    properties:
+                      status: { type: string, example: ok }
+                      service: { type: string, example: fintrack-api }
+                      version: { type: string, example: 0.3.0 }
+                      uptimeSeconds: { type: integer, example: 42 }
+                      timestamp: { type: string, format: date-time }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /health/ready:
+    get:
+      tags: [Health]
+      summary: Readiness probe
+      description: Confirms the database is reachable and reports the applied schema version.
+      security: []
+      responses:
+        '200':
+          description: The API can serve requests.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { type: boolean, example: true }
+                  data:
+                    type: object
+                    required: [status, checks, schemaVersion]
+                    properties:
+                      status: { type: string, example: ready }
+                      checks:
+                        type: object
+                        properties:
+                          database: { type: string, enum: [up, down], example: up }
+                      schemaVersion: { type: string, example: '006' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503':
+          description: A dependency is down. `details` says which one, never why.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              example:
+                success: false
+                error:
+                  code: SERVICE_UNAVAILABLE
+                  message: The service is not ready
+                  details: { database: down }
+                  requestId: 3f0c8f0e-7f0a-4a39-9d55-0c8d1f0f5a11
+  /auth/register:
+    post:
+      tags: [Authentication]
+      summary: Create an account and sign in
+      description: Limited to 10 requests per hour per client. New accounts always get the USER role.
+      security: []
+      parameters: [{ $ref: '#/components/parameters/RequestedWith' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fullName, email, password]
+              properties:
+                fullName: { type: string, minLength: 2, maxLength: 100, example: Meera Pillai }
+                email: { type: string, format: email, maxLength: 254 }
+                password:
+                  type: string
+                  format: password
+                  description: 10 to 72 characters with a lowercase letter, an uppercase letter, a number and a symbol. Must not contain the name or email, or be a common password.
+                baseCurrency: { $ref: '#/components/schemas/CurrencyCode' }
+      responses:
+        '201': { $ref: '#/components/responses/Session' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: The email address is already registered.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /auth/login:
+    post:
+      tags: [Authentication]
+      summary: Sign in
+      description: |
+        Limited to 10 requests per 15 minutes per client. Five wrong passwords in a row lock the
+        account for 15 minutes. An unknown email and a wrong password return the same 401.
+        When the account has two-step sign-in on, a correct password returns
+        `{ mfaRequired: true, challengeToken, expiresInMinutes: 5 }` instead of a session, and no
+        cookie; complete it with POST /auth/mfa/verify.
+      security: []
+      parameters: [{ $ref: '#/components/parameters/RequestedWith' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, format: password }
+      responses:
+        '200': { $ref: '#/components/responses/Session' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403':
+          description: The password is correct but the account is deactivated or suspended (or the request failed the CSRF check).
+          content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } }
+        '423':
+          description: The account is temporarily locked after repeated failed attempts.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /auth/mfa/verify:
+    post:
+      tags: [Authentication]
+      summary: Complete a two-step sign-in with an authenticator or recovery code
+      description: |
+        The challenge from /auth/login is valid for 5 minutes, works once and allows 5 attempts.
+        Wrong codes count towards the same account lockout as wrong passwords. An authenticator
+        code is accepted once (its 30-second step is remembered); a recovery code ("xxxx-xxxx")
+        works once, and the user is notified when one is used.
+      security: []
+      parameters: [{ $ref: '#/components/parameters/RequestedWith' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [challengeToken, code]
+              properties:
+                challengeToken: { type: string }
+                code: { type: string, example: '123456' }
+      responses:
+        '200': { $ref: '#/components/responses/Session' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '423': { description: Too many failed attempts; the account is locked for 15 minutes. }
+  /auth/refresh:
+    post:
+      tags: [Authentication]
+      summary: Exchange the refresh cookie for a new access token
+      description: |
+        Reads the `ft_refresh` cookie, returns a new access token and replaces the cookie
+        (rotation). A refresh token works once: presenting an already-used token revokes the
+        whole session.
+      security: [{ refreshCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/RequestedWith' }]
+      responses:
+        '200': { $ref: '#/components/responses/Session' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /auth/logout:
+    post:
+      tags: [Authentication]
+      summary: Sign out
+      description: Revokes the session of the refresh cookie and clears the cookie. Safe to call twice.
+      security: [{ refreshCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/RequestedWith' }]
+      responses:
+        '204': { description: Signed out. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /auth/forgot-password:
+    post:
+      tags: [Authentication]
+      summary: Request a password reset link
+      description: |
+        Always answers 200 with the same message, whether or not the address has an account.
+        The link is valid for 30 minutes and works once. Limited to 5 requests per hour per client.
+      security: []
+      parameters: [{ $ref: '#/components/parameters/RequestedWith' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties: { email: { type: string, format: email } }
+      responses:
+        '200': { $ref: '#/components/responses/Message' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /auth/reset-password:
+    post:
+      tags: [Authentication]
+      summary: Choose a new password with a reset token
+      description: Ends every session of the account.
+      security: []
+      parameters: [{ $ref: '#/components/parameters/RequestedWith' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token: { type: string }
+                password: { type: string, format: password }
+      responses:
+        '200': { $ref: '#/components/responses/Message' }
+        '400':
+          description: The token is invalid, used or expired, or the password breaks the policy.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /users/profile:
+    get:
+      tags: [Account]
+      summary: Read your own profile
+      responses:
+        '200': { $ref: '#/components/responses/Profile' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+    put:
+      tags: [Account]
+      summary: Update your name and phone number
+      description: Email, roles, status and main currency cannot be changed here; such fields are ignored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fullName]
+              properties:
+                fullName: { type: string, minLength: 2, maxLength: 100 }
+                phone: { type: string, nullable: true, description: Empty or null removes the number. Stored encrypted., example: '+91 98765 43210' }
+      responses:
+        '200': { $ref: '#/components/responses/Profile' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+  /users/password:
+    put:
+      tags: [Account]
+      summary: Change your password
+      description: Requires the current password. Signs out every other session.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword: { type: string, format: password }
+                newPassword: { type: string, format: password }
+      responses:
+        '200':
+          description: Password changed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  data:
+                    type: object
+                    properties: { otherSessionsRevoked: { type: integer, example: 1 } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+  /users/deactivate:
+    post:
+      tags: [Account]
+      summary: Deactivate your account
+      description: Requires the password. The account is kept but can no longer sign in; every session ends. Not available to administrators.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties: { password: { type: string, format: password } }
+      responses:
+        '204': { description: Deactivated. }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /security/sessions:
+    get:
+      tags: [Security]
+      summary: List your active sessions
+      responses:
+        '200':
+          description: Active sessions, most recently used first.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Session' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+    delete:
+      tags: [Security]
+      summary: Sign out everywhere else
+      description: Revokes every session except the one making the request.
+      responses:
+        '200':
+          description: Number of sessions ended.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  data:
+                    type: object
+                    properties: { revoked: { type: integer, example: 2 } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+  /security/sessions/{id}:
+    delete:
+      tags: [Security]
+      summary: End one of your sessions
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '204': { description: Session ended. }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /security/events:
+    get:
+      tags: [Security]
+      summary: Your sign-in history and security events
+      parameters:
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/PageSize' }
+        - { name: eventType, in: query, schema: { type: string, example: LOGIN_FAILED } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+  /security/audit-logs:
+    get:
+      tags: [Security]
+      summary: Your own entries in the tamper-evident audit log
+      description: Entries name the action, record and changed field names; never amounts, notes or secrets.
+      parameters:
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/PageSize' }
+        - { name: eventType, in: query, schema: { type: string, enum: [AUTH, ACCOUNT, DATA, ADMIN] } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  # ---------------------------------------------------------------- Phase 7: administration
+  # ADMIN role required (403 otherwise; the refusal is recorded as ACCESS_DENIED).
+  # No admin route returns another user's transactions, budgets, goals or notes.
+  /security/mfa:
+    get:
+      tags: [Security]
+      summary: Whether two-step sign-in is on, since when, and how many recovery codes are left
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /security/mfa/setup:
+    post:
+      tags: [Security]
+      summary: Start setting up two-step sign-in
+      description: |
+        Returns a new TOTP secret (base32) and the otpauth:// URI for a QR code. The secret is
+        stored encrypted and does nothing until confirmed with /security/mfa/enable; 409 when it
+        is already on. All /security/mfa routes allow 10 requests per 15 minutes per account.
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /security/mfa/enable:
+    post:
+      tags: [Security]
+      summary: Turn two-step sign-in on with the first code from the app; returns 10 recovery codes once
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [code], properties: { code: { type: string } } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /security/mfa/disable:
+    post:
+      tags: [Security]
+      summary: Turn two-step sign-in off (needs the password and a current or recovery code)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password, code]
+              properties: { password: { type: string, format: password }, code: { type: string } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /security/mfa/recovery-codes:
+    post:
+      tags: [Security]
+      summary: Replace the recovery codes (needs the password); returns the new codes once
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [password], properties: { password: { type: string, format: password } } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /admin/overview:
+    get:
+      tags: [Admin]
+      summary: Account, session, usage and security counts
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /admin/users:
+    get:
+      tags: [Admin]
+      summary: Accounts (metadata only)
+      parameters:
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/PageSize' }
+        - { name: search, in: query, description: Name or email substring., schema: { type: string, maxLength: 100 } }
+        - { name: status, in: query, schema: { type: string, enum: [ACTIVE, SUSPENDED, DEACTIVATED] } }
+        - { name: role, in: query, schema: { type: string, enum: [USER, ADMIN] } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /admin/users/{id}/status:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    patch:
+      tags: [Admin]
+      summary: Suspend (ends every session) or reactivate an account
+      description: Not your own account, not an account closed by its owner, not the last active administrator.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string, enum: [ACTIVE, SUSPENDED] } } } } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /admin/users/{id}/roles:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    put:
+      tags: [Admin]
+      summary: Grant or remove a role
+      description: Takes effect on the user's next request. Not your own account; the last active administrator keeps ADMIN; USER cannot be removed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role, granted]
+              properties: { role: { type: string, enum: [ADMIN, USER] }, granted: { type: boolean } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /admin/users/{id}/unlock:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Admin]
+      summary: Clear a sign-in lockout
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /admin/security-events:
+    get:
+      tags: [Admin]
+      summary: Security events across all accounts
+      parameters:
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/PageSize' }
+        - { name: eventType, in: query, schema: { type: string } }
+        - { name: severity, in: query, schema: { type: string, enum: [INFO, WARNING, CRITICAL] } }
+        - { name: userId, in: query, schema: { type: integer } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /admin/audit-logs:
+    get:
+      tags: [Admin]
+      summary: The audit log across all accounts
+      parameters:
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/PageSize' }
+        - { name: eventType, in: query, schema: { type: string, enum: [AUTH, ACCOUNT, DATA, ADMIN] } }
+        - { name: action, in: query, schema: { type: string, example: USER_SUSPENDED } }
+        - { name: userId, in: query, schema: { type: integer } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /admin/audit-logs/verify:
+    post:
+      tags: [Admin]
+      summary: Recompute the whole audit hash chain
+      description: |
+        Reports `{ valid, checkedRows, lastId }` or the first broken row and why. Detects tampering;
+        it cannot prevent or undo it. The check itself is recorded. Limited to 10 per 15 minutes.
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  # ---------------------------------------------------------------- Phase 8: AI assistant
+  /assistant/insights:
+    get:
+      tags: [Assistant]
+      summary: Findings about your own spending
+      description: |
+        Insight cards, unusual expenses (robust z-score and Isolation Forest, each with a reason),
+        a month-end spending estimate with a range, budget suggestions, regular payments and goal
+        outlook. Computed by the internal AI service from your records of the last 13 months only.
+        Limited to 30 calls per 5 minutes per user. Estimates are not guarantees and nothing here is
+        financial advice.
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /assistant/ask:
+    post:
+      tags: [Assistant]
+      summary: Ask a question about your own records
+      description: |
+        Answered by a rule-based engine from your records only: the response gives `answer`,
+        `facts` (label and value pairs), the `period` it used, `followUps` and, where relevant, a
+        `disclaimer`. Investment, tax, loan and insurance questions are declined. Questions are
+        not stored. Shares the per-user limit with /assistant/insights.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question]
+              properties: { question: { type: string, minLength: 2, maxLength: 500, example: How much did I spend on food last month? } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+
+  # ---------------------------------------------------------------- Phase 6: money features
+  # Every route below requires a bearer token and works on the caller's own data only;
+  # an id that belongs to another user answers 404.
+  /categories:
+    get:
+      tags: [Categories]
+      summary: List categories visible to you
+      parameters:
+        - { name: type, in: query, schema: { $ref: '#/components/schemas/TxnType' } }
+        - { name: includeArchived, in: query, schema: { type: boolean, default: false } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+    post:
+      tags: [Categories]
+      summary: Create a category
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, type]
+              properties:
+                name: { type: string, maxLength: 50 }
+                type: { $ref: '#/components/schemas/TxnType' }
+                color: { type: string, pattern: '^#[0-9A-Fa-f]{6}$', nullable: true }
+      responses:
+        '201': { $ref: '#/components/responses/Ok' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /categories/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    put:
+      tags: [Categories]
+      summary: Rename or recolour one of your categories
+      description: Default categories cannot be changed (404).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, maxLength: 50 }
+                color: { type: string, nullable: true }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [Categories]
+      summary: Delete (unused) or archive (in use) one of your categories
+      responses:
+        '200':
+          description: '`{ outcome: "deleted" | "archived" }`'
+          content: { application/json: { schema: { type: object } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /transactions:
+    get:
+      tags: [Transactions]
+      summary: List, filter, search and page through your transactions
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: type, in: query, schema: { $ref: '#/components/schemas/TxnType' } }
+        - { name: categoryId, in: query, schema: { type: integer } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - { name: minAmount, in: query, description: In the main currency., schema: { type: string } }
+        - { name: maxAmount, in: query, description: In the main currency., schema: { type: string } }
+        - { name: search, in: query, description: 'Substring of the description; % and _ are literal.', schema: { type: string, maxLength: 100 } }
+        - { name: paymentMethod, in: query, schema: { $ref: '#/components/schemas/PaymentMethod' } }
+        - { name: currency, in: query, schema: { $ref: '#/components/schemas/CurrencyCode' } }
+        - { name: foreignOnly, in: query, schema: { type: boolean } }
+        - { name: sort, in: query, schema: { type: string, enum: [date, amount, created], default: date } }
+        - { name: order, in: query, schema: { type: string, enum: [asc, desc], default: desc } }
+      responses:
+        '200':
+          description: A page of transactions; `meta.pagination` describes the pages. Notes are not included in lists.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { type: array, items: { $ref: '#/components/schemas/Transaction' } }
+                  meta: { type: object, properties: { pagination: { $ref: '#/components/schemas/Pagination' } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+    post:
+      tags: [Transactions]
+      summary: Record an income or expense
+      description: |
+        Foreign-currency entries are converted with the stored rate snapshot for their date; if
+        none from the previous 7 days exists, today's rate is fetched and stored first. May raise
+        budget-threshold and unusual-spending notifications.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/TransactionInput' } } }
+      responses:
+        '201':
+          description: Created.
+          content: { application/json: { schema: { type: object, properties: { data: { $ref: '#/components/schemas/Transaction' } } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /transactions/import:
+    post:
+      tags: [Transactions]
+      summary: Import rows from a CSV file (preview first, then save)
+      description: |
+        The web app reads the file and maps its columns; this endpoint takes up to 500 rows per
+        request. Each row is checked on its own: date (YYYY-MM-DD, not in the future), type,
+        amount, currency, description, category name (or a fallback category per type), and
+        payment method (names such as "Card" or "Bank transfer" are accepted). A row matching an
+        existing transaction (same date, amount, currency and description) is a duplicate.
+        With dryRun true (the default) nothing is saved and each row comes back as ready,
+        duplicate or error. With dryRun false, ready rows are saved (duplicates only when
+        skipDuplicates is false) through the normal path, without a confirmation each; one
+        summary notification follows. 60 requests per 15 minutes per user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rows]
+              properties:
+                rows:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    type: object
+                    properties:
+                      date: { type: string, format: date }
+                      type: { type: string, example: EXPENSE }
+                      amount: { type: string, example: '1250.50' }
+                      currency: { type: string, example: INR }
+                      description: { type: string }
+                      category: { type: string, example: Groceries }
+                      paymentMethod: { type: string, example: Card }
+                      notes: { type: string, nullable: true }
+                dryRun: { type: boolean, default: true }
+                skipDuplicates: { type: boolean, default: true }
+                fallbackCategories:
+                  type: object
+                  properties: { EXPENSE: { type: integer }, INCOME: { type: integer } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+  /transactions/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Transactions]
+      summary: One transaction, including its decrypted notes
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Transactions]
+      summary: Replace a transaction
+      description: The stored rate is kept unless the currency or the date changes.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/TransactionInput' } } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Transactions]
+      summary: Delete a transaction (soft delete)
+      responses:
+        '204': { description: Deleted. }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /recurring:
+    get:
+      tags: [Recurring]
+      summary: Your recurring transactions, after creating any that have fallen due
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+    post:
+      tags: [Recurring]
+      summary: Create a weekly, monthly or yearly recurring transaction
+      description: |
+        Occurrence n falls on startDate plus n weeks, months or years (a monthly rule from the
+        31st uses the last day of shorter months). Occurrences up to today are created at once
+        (the start may be up to a year back), later ones when the user next opens transactions,
+        the dashboard or this list. Each is a normal transaction, converted at that day's rate
+        and created exactly once. Returns { rule, generated }.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, categoryId, amount, currency, description, frequency, startDate]
+              properties:
+                type: { type: string, enum: [INCOME, EXPENSE] }
+                categoryId: { type: integer }
+                amount: { type: string, example: '24000.00' }
+                currency: { type: string, example: INR }
+                description: { type: string, maxLength: 255 }
+                paymentMethod: { type: string, enum: [CASH, CARD, UPI, BANK_TRANSFER, WALLET, OTHER] }
+                frequency: { type: string, enum: [WEEKLY, MONTHLY, YEARLY] }
+                startDate: { type: string, format: date }
+                endDate: { type: string, format: date, nullable: true }
+      responses:
+        '201': { $ref: '#/components/responses/Ok' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+  /recurring/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    put:
+      tags: [Recurring]
+      summary: Change, pause or resume a recurring transaction (applies to future occurrences)
+      description: The schedule (frequency and start) is fixed; delete and recreate to change it. Resuming creates missed occurrences.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, categoryId, amount, currency, description]
+              properties:
+                type: { type: string, enum: [INCOME, EXPENSE] }
+                categoryId: { type: integer }
+                amount: { type: string }
+                currency: { type: string }
+                description: { type: string }
+                paymentMethod: { type: string, enum: [CASH, CARD, UPI, BANK_TRANSFER, WALLET, OTHER] }
+                endDate: { type: string, format: date, nullable: true }
+                paused: { type: boolean, default: false }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Recurring]
+      summary: Stop a recurring transaction; transactions it already created stay
+      responses:
+        '204': { description: Deleted. }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /budgets:
+    get:
+      tags: [Budgets]
+      summary: Budgets of a month with progress
+      parameters: [{ $ref: '#/components/parameters/Month' }]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+    post:
+      tags: [Budgets]
+      summary: Create a budget
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [budgetType, month, amount]
+              properties:
+                budgetType: { type: string, enum: [CATEGORY, OVERALL, SAVINGS_TARGET] }
+                categoryId: { type: integer, nullable: true, description: Required for CATEGORY (an expense category), absent otherwise. }
+                month: { type: string, example: '2026-11' }
+                amount: { $ref: '#/components/schemas/Money' }
+                alertThresholdPct: { type: integer, minimum: 1, maximum: 100, default: 80 }
+      responses:
+        '201': { $ref: '#/components/responses/Ok' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /budgets/copy:
+    post:
+      tags: [Budgets]
+      summary: Copy every budget of one month to another (existing ones are kept)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fromMonth, toMonth]
+              properties: { fromMonth: { type: string }, toMonth: { type: string } }
+      responses:
+        '200': { description: '`{ copied: n }`', content: { application/json: { schema: { type: object } } } }
+  /budgets/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    put:
+      tags: [Budgets]
+      summary: Change a budget's amount or alert threshold
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount]
+              properties: { amount: { $ref: '#/components/schemas/Money' }, alertThresholdPct: { type: integer } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Budgets]
+      summary: Delete a budget
+      responses:
+        '204': { description: Deleted. }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /goals:
+    get:
+      tags: [Goals]
+      summary: Your savings goals
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+    post:
+      tags: [Goals]
+      summary: Create a savings goal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, targetAmount, currency]
+              properties:
+                title: { type: string, maxLength: 100 }
+                targetAmount: { $ref: '#/components/schemas/Money' }
+                currency: { $ref: '#/components/schemas/CurrencyCode' }
+                deadline: { type: string, format: date, nullable: true }
+                notes: { type: string, nullable: true, description: Stored encrypted. }
+      responses:
+        '201': { $ref: '#/components/responses/Ok' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+  /goals/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Goals]
+      summary: One goal with its latest 100 contributions
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Goals]
+      summary: Edit, cancel (status CANCELLED) or reopen (status IN_PROGRESS) a goal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, targetAmount]
+              properties:
+                title: { type: string }
+                targetAmount: { $ref: '#/components/schemas/Money' }
+                deadline: { type: string, format: date, nullable: true }
+                notes: { type: string, nullable: true }
+                status: { type: string, enum: [IN_PROGRESS, CANCELLED] }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Goals]
+      summary: Delete a goal and its contributions
+      responses:
+        '204': { description: Deleted. }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /goals/{id}/contributions:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Goals]
+      summary: Add money (positive amount) or withdraw it (negative amount)
+      description: The saved total cannot go below zero. A cancelled goal answers 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, date]
+              properties:
+                amount: { type: string, example: '-250.00' }
+                date: { type: string, format: date }
+      responses:
+        '201': { $ref: '#/components/responses/Ok' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /currencies:
+    get:
+      tags: [Currencies]
+      summary: Supported currencies and your main currency
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /currencies/rates:
+    get:
+      tags: [Currencies]
+      summary: Newest stored rate from a base currency to each other currency
+      parameters: [{ name: base, in: query, schema: { $ref: '#/components/schemas/CurrencyCode' } }]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /currencies/rates/refresh:
+    post:
+      tags: [Currencies]
+      summary: Fetch and store today's rates for every supported currency
+      description: Limited to 10 requests per 15 minutes. Only currency codes are sent to the rates service.
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /currencies/convert:
+    get:
+      tags: [Currencies]
+      summary: Convert an amount with the newest stored rate
+      parameters:
+        - { name: amount, in: query, required: true, schema: { type: string } }
+        - { name: from, in: query, required: true, schema: { $ref: '#/components/schemas/CurrencyCode' } }
+        - { name: to, in: query, required: true, schema: { $ref: '#/components/schemas/CurrencyCode' } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+  /currencies/base:
+    put:
+      tags: [Currencies]
+      summary: Change your main currency
+      description: |
+        Re-values every transaction at the rate of its own date and every budget at the latest
+        rate, in one database transaction. Original amounts are never changed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [baseCurrency], properties: { baseCurrency: { $ref: '#/components/schemas/CurrencyCode' } } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+
+  /analytics/summary:
+    get:
+      tags: [Analytics]
+      summary: Income, expenses, net and savings rate for a period, with the change on the previous period
+      description: |
+        Use `month`, or `from` and `to` for any range (the Analytics page sends a day, a
+        Monday-to-Sunday week, a month or a calendar year). The comparison period:
+        a day -> the day before; a week -> the week before; a calendar month -> the month before;
+        a calendar year -> the year before; any other range -> the range of the same length just
+        before it. While a week, month or year is still running, the comparison stops at the same
+        point of the previous one.
+      parameters:
+        - $ref: '#/components/parameters/Month'
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /analytics/monthly:
+    get:
+      tags: [Analytics]
+      summary: One entry per month (empty months included)
+      parameters:
+        - { name: months, in: query, schema: { type: integer, minimum: 1, maximum: 24, default: 6 } }
+        - { name: until, in: query, schema: { type: string, example: '2026-11' } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /analytics/categories:
+    get:
+      tags: [Analytics]
+      summary: Totals by category for a period
+      parameters:
+        - $ref: '#/components/parameters/Month'
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - { name: type, in: query, schema: { $ref: '#/components/schemas/TxnType' } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /analytics/dashboard:
+    get:
+      tags: [Analytics]
+      summary: Everything the dashboard shows, in one request
+      parameters: [{ $ref: '#/components/parameters/Month' }]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+
+  /reports/monthly:
+    get:
+      tags: [Reports]
+      summary: The monthly report (categories, days, payment methods, largest expenses, budgets)
+      parameters: [{ $ref: '#/components/parameters/Month' }]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /reports/export:
+    get:
+      tags: [Reports]
+      summary: Download transactions as CSV (up to 10 000 rows)
+      description: |
+        UTF-8 with a byte-order mark. Text cells are quoted, and text starting with = + - @ is
+        prefixed with an apostrophe so spreadsheets cannot run it as a formula.
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - { name: type, in: query, schema: { $ref: '#/components/schemas/TxnType' } }
+      responses:
+        '200':
+          description: The CSV file, as an attachment.
+          content: { text/csv: { schema: { type: string } } }
+
+  /notifications:
+    get:
+      tags: [Notifications]
+      summary: Your notifications, newest first
+      description: |
+        The first call in a new month also creates last month's summary. Types: BUDGET_THRESHOLD,
+        UNUSUAL_SPENDING, TRANSACTION (confirmation of each new transaction), SECURITY,
+        MONTHLY_SUMMARY, SYSTEM.
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, maximum: 100, default: 20 } }
+        - { name: unreadOnly, in: query, schema: { type: boolean } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /notifications/unread-count:
+    get:
+      tags: [Notifications]
+      summary: Number of unread notifications
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /notifications/read-all:
+    post:
+      tags: [Notifications]
+      summary: Mark every notification as read
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+  /notifications/{id}/read:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    patch:
+      tags: [Notifications]
+      summary: Mark one notification as read
+      responses:
+        '204': { description: Marked. }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /notifications/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    delete:
+      tags: [Notifications]
+      summary: Delete one notification
+      responses:
+        '204': { description: Deleted. }
+        '404': { $ref: '#/components/responses/NotFound' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: '15-minute access token returned by register, login and refresh. Send it in the Authorization header as "Bearer <token>".'
+    refreshCookie:
+      type: apiKey
+      in: cookie
+      name: ft_refresh
+      description: httpOnly, SameSite=Strict cookie scoped to /api/auth. Set by the server; never readable by JavaScript.
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSize:
+      name: pageSize
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    Month:
+      name: month
+      in: query
+      description: Calendar month; defaults to the current month.
+      schema: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$', example: '2026-11' }
+    RequestedWith:
+      name: X-Requested-With
+      in: header
+      required: true
+      description: Any non-empty value. Part of the CSRF defence on /auth routes; requests without it get 403.
+      schema: { type: string, example: XMLHttpRequest }
+  schemas:
+    Money:
+      type: string
+      description: A positive decimal with at most 2 places, sent as a string so it is never rounded through a float. JPY takes whole numbers.
+      example: '1200.50'
+    TxnType:
+      type: string
+      enum: [INCOME, EXPENSE]
+    PaymentMethod:
+      type: string
+      enum: [CASH, CARD, UPI, BANK_TRANSFER, WALLET, OTHER]
+    TransactionInput:
+      type: object
+      required: [type, categoryId, amount, currency, date, description]
+      properties:
+        type: { $ref: '#/components/schemas/TxnType' }
+        categoryId: { type: integer, description: A category of the same type that you can see. }
+        amount: { $ref: '#/components/schemas/Money' }
+        currency: { $ref: '#/components/schemas/CurrencyCode' }
+        date: { type: string, format: date, description: Not more than one day in the future. }
+        description: { type: string, maxLength: 255 }
+        paymentMethod: { $ref: '#/components/schemas/PaymentMethod' }
+        notes: { type: string, maxLength: 2000, nullable: true, description: Stored encrypted (AES-256-GCM). }
+    Transaction:
+      type: object
+      properties:
+        id: { type: integer }
+        type: { $ref: '#/components/schemas/TxnType' }
+        amount: { type: string, description: As entered. }
+        currency: { type: string, description: As entered. }
+        baseAmount: { type: string, description: Value in the main currency. }
+        baseCurrency: { type: string }
+        exchangeRate: { type: string, description: 'amount x exchangeRate = baseAmount' }
+        description: { type: string }
+        paymentMethod: { $ref: '#/components/schemas/PaymentMethod' }
+        date: { type: string, format: date }
+        category: { type: object, properties: { id: { type: integer }, name: { type: string }, color: { type: string, nullable: true } } }
+        hasNotes: { type: boolean }
+        notes: { type: string, nullable: true, description: 'Only on GET /transactions/{id}.' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CurrencyCode:
+      type: string
+      enum: [INR, USD, EUR, GBP, JPY]
+      default: INR
+    SessionUser:
+      type: object
+      properties:
+        id: { type: integer, example: 12 }
+        fullName: { type: string, example: Meera Pillai }
+        email: { type: string, format: email }
+        baseCurrency: { $ref: '#/components/schemas/CurrencyCode' }
+        roles: { type: array, items: { type: string, enum: [USER, ADMIN] } }
+    Profile:
+      allOf:
+        - $ref: '#/components/schemas/SessionUser'
+        - type: object
+          properties:
+            phone: { type: string, nullable: true }
+            status: { type: string, enum: [ACTIVE, DEACTIVATED, SUSPENDED] }
+            createdAt: { type: string, format: date-time }
+            lastLoginAt: { type: string, format: date-time, nullable: true }
+            passwordChangedAt: { type: string, format: date-time }
+    Session:
+      type: object
+      properties:
+        id: { type: integer }
+        ipAddress: { type: string, nullable: true }
+        userAgent: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        lastUsedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        current: { type: boolean, description: True for the session making the request. }
+    ErrorResponse:
+      type: object
+      required: [success, error]
+      properties:
+        success: { type: boolean, example: false }
+        error:
+          type: object
+          required: [code, message, requestId]
+          properties:
+            code:
+              type: string
+              description: Stable machine-readable code.
+              enum:
+                - BAD_REQUEST
+                - INVALID_JSON
+                - VALIDATION_ERROR
+                - UNAUTHENTICATED
+                - FORBIDDEN
+                - NOT_FOUND
+                - CONFLICT
+                - PAYLOAD_TOO_LARGE
+                - ACCOUNT_LOCKED
+                - RATE_LIMITED
+                - INTERNAL_ERROR
+                - SERVICE_UNAVAILABLE
+            message: { type: string, description: Human-readable, safe to show to the user. }
+            details:
+              description: For VALIDATION_ERROR, a list of `{ field, message }`.
+            requestId: { type: string, format: uuid }
+    Pagination:
+      type: object
+      properties:
+        page: { type: integer, example: 1 }
+        pageSize: { type: integer, example: 20 }
+        totalItems: { type: integer, example: 186 }
+        totalPages: { type: integer, example: 10 }
+  responses:
+    Ok:
+      description: 'Success: `{ success: true, data }`.'
+      content: { application/json: { schema: { type: object, properties: { success: { type: boolean, example: true }, data: {} } } } }
+    Conflict:
+      description: The change clashes with existing data (duplicate name, duplicate budget, cancelled goal).
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } }
+    Unavailable:
+      description: A dependency (the exchange-rate service or the AI service) cannot be reached right now.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } }
+    Session:
+      description: Signed in. The refresh token is set as the `ft_refresh` cookie, never returned in the body.
+      headers:
+        Set-Cookie: { schema: { type: string, example: 'ft_refresh=...; Path=/api/auth; HttpOnly; SameSite=Strict' } }
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              success: { type: boolean, example: true }
+              data:
+                type: object
+                properties:
+                  user: { $ref: '#/components/schemas/SessionUser' }
+                  accessToken: { type: string, description: JWT valid for 15 minutes. Keep it in memory only. }
+    Profile:
+      description: The signed-in user's profile.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              success: { type: boolean, example: true }
+              data: { $ref: '#/components/schemas/Profile' }
+    Message:
+      description: Done.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              success: { type: boolean, example: true }
+              data:
+                type: object
+                properties: { message: { type: string } }
+    ValidationError:
+      description: One or more fields are invalid.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            success: false
+            error:
+              code: VALIDATION_ERROR
+              message: Some fields are invalid
+              details: [{ field: body.amount, message: Amount must be greater than 0 }]
+              requestId: 3f0c8f0e-7f0a-4a39-9d55-0c8d1f0f5a11
+    Unauthenticated:
+      description: Missing, invalid or expired access token.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Forbidden:
+      description: Authenticated, but not allowed to do this.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    NotFound:
+      description: The resource does not exist or belongs to another user.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    RateLimited:
+      description: Too many requests.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    InternalError:
+      description: Unexpected failure. No internal detail is disclosed.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }

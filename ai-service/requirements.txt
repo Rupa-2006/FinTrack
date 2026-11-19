@@ -1,0 +1,7 @@
+# FinTrack AI service. Exact versions, so every install behaves the same.
+# (scikit-learn is not used: see app/services/iforest.py for why.)
+fastapi==0.163.1
+uvicorn==0.54.0
+pydantic==2.14.3
+python-dotenv==1.2.2
+numpy==2.5.5
