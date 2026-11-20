@@ -55,6 +55,10 @@ is [INSTALLATION.md](docs/INSTALLATION.md). In short:
 3. From `frontend/`: `npm install`, `npm run dev`.
 4. From `ai-service/`: create `.venv`, install `requirements-dev.txt`, start uvicorn on port 8000.
 
+After that first setup, **double-click `start-fintrack.cmd`** in the project folder. It checks
+MySQL, starts the API, AI service and website in their own windows, waits until all three are
+ready and opens the site. Close the three "FinTrack" windows to stop.
+
 Open http://localhost:5180 and sign in as `aarav.sharma@fintrack.demo` (user) or
 `admin@fintrack.demo` (administrator). The demo password is in `backend/scripts/seed-demo.js`
 (development only; the seed refuses to run in production).
