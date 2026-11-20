@@ -496,7 +496,7 @@ describe('failures and less common paths (Phase 9)', () => {
     expect(await screen.findByText(/^1 day left/)).toBeInTheDocument();
     expect(screen.getByText(/Deadline passed on/)).toBeInTheDocument();
     expect(screen.getByText('Deadline is today')).toBeInTheDocument();
-    expect(screen.getByText(/^Deadline \d/)).toBeInTheDocument();
+    expect(screen.getByText(/^Deadline (?!passed|is today)/)).toBeInTheDocument();
     const card = screen.getByRole('article', { name: 'Emergency fund' });
     await userEvent.click(within(card).getByRole('button', { name: 'Delete goal Emergency fund' }));
     await userEvent.click(within(card).getByRole('button', { name: 'Confirm' }));

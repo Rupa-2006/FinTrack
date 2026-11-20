@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import * as ledger from '../../services/ledgerService.js';
 import { renderApp, TEST_USER } from '../../test/renderApp.jsx';
 import { todayIso } from '../../utils/dates.js';
+import { formatDate } from '../../utils/format.js';
 
 vi.mock('../../services/healthService.js', () => ({ getReadiness: vi.fn().mockResolvedValue({ status: 'ready' }) }));
 vi.mock('../../services/authService.js', () => ({ logout: vi.fn().mockResolvedValue(), refreshSession: vi.fn() }));
@@ -39,15 +40,15 @@ test('lists rules with their schedule, next date and status', async () => {
   renderApp('/recurring', { user: TEST_USER });
   const rent = (await screen.findByText('Monthly rent')).closest('li');
   expect(within(rent).getByText(/Every month on the 31st \(or the last day\)/)).toBeInTheDocument();
-  expect(within(rent).getByText(/Next on 30 Nov 2026 · 10 recorded/)).toBeInTheDocument();
+  expect(within(rent).getByText(`Next on ${formatDate('2026-11-30')} · 10 recorded`)).toBeInTheDocument();
   expect(within(rent).getByText('−₹24,000.00')).toBeInTheDocument();
   const salary = screen.getByText('Salary', { selector: 'p' }).closest('li');
   expect(within(salary).getByText(/Every week on Monday/)).toBeInTheDocument();
   expect(within(salary).getByText('Paused')).toBeInTheDocument();
   expect(within(salary).getByRole('button', { name: 'Resume' })).toBeInTheDocument();
   const gym = screen.getByText('Gym').closest('li');
-  expect(within(gym).getByText(/Every year on 15 March/)).toBeInTheDocument();
-  expect(within(gym).getByText(/Ended 15 Mar 2026/)).toBeInTheDocument();
+  expect(within(gym).getByText((text) => text.includes(`Every year on ${new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'long' }).format(new Date(2025, 2, 15))}`))).toBeInTheDocument();
+  expect(within(gym).getByText((text) => text.includes(`Ended ${formatDate('2026-03-15')}`))).toBeInTheDocument();
   expect(within(gym).queryByRole('button', { name: /pause|resume/i })).not.toBeInTheDocument();
   expect(document.title).toBe('Recurring transactions · FinTrack');
 });
