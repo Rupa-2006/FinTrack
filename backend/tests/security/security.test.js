@@ -293,7 +293,8 @@ describe('admin area', () => {
       (await admin.api.get('/admin/overview')).body,
     ]);
     expect(everything).toContain(user.email);
-    expect(everything).not.toMatch(/777|Therapy|confidential|surgery/);
+    // "777.77" is the seeded amount; a bare "777" can appear by chance in random ids and hashes.
+    expect(everything).not.toMatch(/777\.77|Therapy|confidential|surgery/);
   });
 
   test('the admin queries never read financial columns', () => {
